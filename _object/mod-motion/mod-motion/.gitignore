@@ -1,0 +1,11 @@
+*.atsln
+*.log
+*.cproj
+*.xml
+
+Debug/
+doxygen/
+examples/
+modules/
+utils/
+

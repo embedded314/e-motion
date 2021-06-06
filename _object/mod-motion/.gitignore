@@ -1,0 +1,7 @@
+*.atsln
+*.log
+*.cproj
+*.xml
+*.md
+
+.vs/

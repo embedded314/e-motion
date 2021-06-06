@@ -1,0 +1,6 @@
+*.launch
+*.ld
+
+Debug/
+Drivers/
+Middlewares/
