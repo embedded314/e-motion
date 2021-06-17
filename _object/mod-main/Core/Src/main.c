@@ -25,7 +25,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "../mod-sens/distance.h"
+#include "distance.h"
 
 /* USER CODE END Includes */
 
@@ -56,27 +56,9 @@ TIM_HandleTypeDef htim9;
 
 UART_HandleTypeDef huart2;
 
-/* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for RightDistSensor */
-osThreadId_t RightDistSensorHandle;
-const osThreadAttr_t RightDistSensor_attributes = {
-  .name = "RightDistSensor",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
-};
-/* Definitions for LeftDistSensor */
-osThreadId_t LeftDistSensorHandle;
-const osThreadAttr_t LeftDistSensor_attributes = {
-  .name = "LeftDistSensor",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
-};
+osThreadId defaultTaskHandle;
+osThreadId MM_R_taskHandle;
+osThreadId MM_L_taskHandle;
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -92,9 +74,9 @@ static void MX_SPI3_Init(void);
 static void MX_TIM9_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM5_Init(void);
-void StartDefaultTask(void *argument);
-void RightDS(void *argument);
-void LeftDS(void *argument);
+void StartDefaultTask(void const * argument);
+void MM_R_t(void const * argument);
+void MM_L_t(void const * argument);
 
 /* USER CODE BEGIN PFP */
 /* USER CODE END PFP */
@@ -142,10 +124,10 @@ int main(void)
   MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_IC_Start_IT(&htim2, HAL_TIM_ACTIVE_CHANNEL_1);
-  /* USER CODE END 2 */
+  HAL_TIM_IC_Start_IT(&htim5, HAL_TIM_ACTIVE_CHANNEL_2);
 
-  /* Init scheduler */
-  osKernelInitialize();
+  MM_task_init();
+  /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -164,22 +146,21 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+  /* definition and creation of defaultTask */
+  osThreadDef(defaultTask, StartDefaultTask, osPriorityBelowNormal, 0, 128);
+  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
-  /* creation of RightDistSensor */
-  RightDistSensorHandle = osThreadNew(RightDS, NULL, &RightDistSensor_attributes);
+  /* definition and creation of MM_R_task */
+  osThreadDef(MM_R_task, MM_R_t, osPriorityLow, 0, 128);
+  MM_R_taskHandle = osThreadCreate(osThread(MM_R_task), NULL);
 
-  /* creation of LeftDistSensor */
-  LeftDistSensorHandle = osThreadNew(LeftDS, NULL, &LeftDistSensor_attributes);
+  /* definition and creation of MM_L_task */
+  osThreadDef(MM_L_task, MM_L_t, osPriorityLow, 0, 128);
+  MM_L_taskHandle = osThreadCreate(osThread(MM_L_task), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
-
-  /* USER CODE BEGIN RTOS_EVENTS */
-  /* add events, ... */
-  /* USER CODE END RTOS_EVENTS */
 
   /* Start scheduler */
   osKernelStart();
@@ -454,6 +435,7 @@ static void MX_TIM5_Init(void)
 
   /* USER CODE END TIM5_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_IC_InitTypeDef sConfigIC = {0};
 
@@ -463,9 +445,18 @@ static void MX_TIM5_Init(void)
   htim5.Instance = TIM5;
   htim5.Init.Prescaler = 50;
   htim5.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim5.Init.Period = 4294967295;
+  htim5.Init.Period = 1000000;
   htim5.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim5.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim5) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim5, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
   if (HAL_TIM_IC_Init(&htim5) != HAL_OK)
   {
     Error_Handler();
@@ -479,7 +470,7 @@ static void MX_TIM5_Init(void)
   sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_BOTHEDGE;
   sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
   sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
-  sConfigIC.ICFilter = 0;
+  sConfigIC.ICFilter = 4;
   if (HAL_TIM_IC_ConfigChannel(&htim5, &sConfigIC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
@@ -577,10 +568,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, Trig_R_DS_Pin|LD2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, MM_R_dist_trig_Pin|LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(Trig_L_DS_GPIO_Port, Trig_L_DS_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(MM_L_dist_trig_GPIO_Port, MM_L_dist_trig_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -588,19 +579,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Trig_R_DS_Pin LD2_Pin */
-  GPIO_InitStruct.Pin = Trig_R_DS_Pin|LD2_Pin;
+  /*Configure GPIO pins : MM_R_dist_trig_Pin LD2_Pin */
+  GPIO_InitStruct.Pin = MM_R_dist_trig_Pin|LD2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : Trig_L_DS_Pin */
-  GPIO_InitStruct.Pin = Trig_L_DS_Pin;
+  /*Configure GPIO pin : MM_L_dist_trig_Pin */
+  GPIO_InitStruct.Pin = MM_L_dist_trig_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(Trig_L_DS_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(MM_L_dist_trig_GPIO_Port, &GPIO_InitStruct);
 
 }
 
@@ -635,49 +626,48 @@ void usDelay (uint32_t uSec)
   * @retval None
   */
 /* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
+void StartDefaultTask(void const * argument)
 {
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+#ifdef UART_MM_DEBUG
+	  UART_DS_debug (MM_drive.LS_distance, MM_drive.RS_distance);
+#endif
+	  osDelay(100);
   }
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_RightDS */
+/* USER CODE BEGIN Header_MM_R_t */
 /**
-* @brief Function implementing the RightDistSensor thread.
+* @brief Function implementing the MM_R_task thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_RightDS */
-void RightDS(void *argument)
+/* USER CODE END Header_MM_R_t */
+void MM_R_t(void const * argument)
 {
-  /* USER CODE BEGIN RightDS */
-	/* Right distance sensor task. */
-	RightDS_task();
-  /* USER CODE END RightDS */
+  /* USER CODE BEGIN MM_R_t */
+  /* Infinite loop */
+	MM_R_dist_t();
+  /* USER CODE END MM_R_t */
 }
 
-/* USER CODE BEGIN Header_LeftDS */
+/* USER CODE BEGIN Header_MM_L_t */
 /**
-* @brief Function implementing the LeftDistSensor thread.
+* @brief Function implementing the MM_L_task thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_LeftDS */
-void LeftDS(void *argument)
+/* USER CODE END Header_MM_L_t */
+void MM_L_t(void const * argument)
 {
-  /* USER CODE BEGIN LeftDS */
-	/* Left distance sensor task. */
+  /* USER CODE BEGIN MM_L_t */
   /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END LeftDS */
+	MM_L_dist_t();
+  /* USER CODE END MM_L_t */
 }
 
  /**

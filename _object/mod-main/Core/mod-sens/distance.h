@@ -21,15 +21,41 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f4xx_hal.h"
 
-uint32_t IC_Value1;
-uint32_t IC_Value2;
-uint32_t Difference;
-uint16_t Distance;
-volatile uint16_t distance_tab[5];
+#define UART_MM_DEBUG
 
-void RightDS_task( void );
+enum {
+	FREE = 0,
+	FWD,
+	BACK,
+	TURN
+} MM_drive_dire;
 
-void LeftDS_task( void );
+struct {
+	short int	state;
+	int			RS_distance;
+	int			LS_distance;
+	long		total_distance;
+	signed long	logic_distance;
+} MM_drive;
+
+#define MM_DIST_ARR_SIZE	5
+int MM_L_dist_arr[MM_DIST_ARR_SIZE];
+int MM_R_dist_arr[MM_DIST_ARR_SIZE];
+
+void MM_task_init ( void );
+
+void MM_R_dist_t( void );
+
+void MM_L_dist_t( void );
+
+void clear_array(int *buffer, size_t buffer_size);
+
+int update_array (int *buffer, size_t buffer_size, int new_value);
+
+#ifdef UART_MM_DEBUG
+void UART_DS_debug (int *val_L, int *val_R);
+#endif
+
 
 #ifdef __cplusplus
 }
